@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dominant-strategies/go-quai/cmd/utils"
 	"github.com/dominant-strategies/go-quai/common"
@@ -52,6 +53,16 @@ func deriveNodeKey(keyfile string, location common.Location) *ecdsa.PrivateKey {
 		utils.Fatalf("Failed to load private key", keyfile, err)
 	}
 	return key
+}
+
+func addURLToKey(urls map[string][]string, key string, nodeid string, ipAddress string) {
+	url := fmt.Sprintf("enode://%s@%s", nodeid, ipAddress)
+	urlsForKey, ok := urls[key]
+	if !ok {
+		urlsForKey = []string{}
+	}
+	urlsForKey = append(urlsForKey, url)
+	urls[key] = urlsForKey
 }
 
 func main() {
@@ -86,46 +97,38 @@ func main() {
 		primeLoc := common.Location{} // Prime
 		nodekey := deriveNodeKey(absPath, primeLoc)
 		nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
+
 		primeUrls, ok := urls["prime"]
 		if !ok {
 			primeUrls = []string{}
 		}
-		primeUrls = append(primeUrls, fmt.Sprintf("\"enode://%s@%s\",\n", nodeid, ipAddress))
+		primeUrls = append(primeUrls, fmt.Sprintf("enode://%s@%s", nodeid, ipAddress))
 		urls["prime"] = primeUrls
+
 		for regionNum := 0; regionNum < common.NumRegionsInPrime; regionNum++ {
 			regLoc := common.Location{byte(regionNum)}
 			nodekey := deriveNodeKey(absPath, regLoc)
 			nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
-			region := fmt.Sprintf("region-%d\n", regionNum)
-			regionUrls, ok := urls[region]
-			if !ok {
-				regionUrls = []string{}
-			}
-			regionUrls = append(regionUrls, fmt.Sprintf("\"enode://%s@%s\",\n", nodeid, ipAddress))
-			urls[region] = regionUrls
-		}
-		for regionNum := 0; regionNum < common.NumRegionsInPrime; regionNum++ {
+			regionKey := fmt.Sprintf("region-%d", regionNum)
+			addURLToKey(urls, regionKey, nodeid, ipAddress)
+
 			for zoneNum := 0; zoneNum < common.NumZonesInRegion; zoneNum++ {
 				zoneLoc := common.Location{byte(regionNum), byte(zoneNum)}
-				nodekey := deriveNodeKey(absPath, zoneLoc)
-				nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
-				zone := fmt.Sprintf("zone-%d-%d\n", regionNum, zoneNum)
-				zoneUrls, ok := urls[zone]
-				if !ok {
-					zoneUrls = []string{}
-				}
-				zoneUrls = append(zoneUrls, fmt.Sprintf("\"enode://%s@%s\",\n", nodeid, ipAddress))
-				urls[zone] = zoneUrls
+				nodekey = deriveNodeKey(absPath, zoneLoc)
+				nodeid = fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
+				zoneKey := fmt.Sprintf("zone-%d-%d", regionNum, zoneNum)
+				addURLToKey(urls, zoneKey, nodeid, ipAddress)
 			}
 		}
 
-		jsonOutput, err := json.MarshalIndent(urls, "", "  ")
+		jsonOutput, err := json.Marshal(urls)
 		if err != nil {
 			fmt.Printf("Failed to convert map to JSON: %v\n", err)
 			return
 		}
 
-		// Write to file
-		fmt.Println(string(jsonOutput))
+		cleanedOutput := strings.ReplaceAll(string(jsonOutput), "\\n", "")
+		cleanedOutput = strings.ReplaceAll(cleanedOutput, "\\\"", "")
+		fmt.Println(cleanedOutput)
 	}
 }
