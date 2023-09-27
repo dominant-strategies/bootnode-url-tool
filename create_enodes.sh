@@ -25,7 +25,7 @@ for folder in "$key_dir"/*; do
         mkdir -p "enodes/$ip"
 
         # Run the quai-bootnode-util command and redirect output to the respective enode file
-        ./quai-bootnode-util "$folder/nodekey" > "enodes/$ip/enode.txt"
+        ./quai-bootnode-util "$folder/nodekey" > "enodes/$ip/enode.json"
     fi
 done
 

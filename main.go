@@ -20,6 +20,7 @@ package main
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
@@ -117,6 +118,14 @@ func main() {
 				urls[zone] = zoneUrls
 			}
 		}
+
+		jsonOutput, err := json.MarshalIndent(urls, "", "  ")
+		if err != nil {
+			fmt.Printf("Failed to convert map to JSON: %v\n", err)
+			return
+		}
+
+		// Write to file
+		fmt.Println(string(jsonOutput))
 	}
-	fmt.Println("urls = ", urls)
 }

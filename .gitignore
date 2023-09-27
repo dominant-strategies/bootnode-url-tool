@@ -5,3 +5,5 @@ keys/
 nodeurls.txt
 keys.yml
 enodes/
+static-nodes/
+nodeurls.json
