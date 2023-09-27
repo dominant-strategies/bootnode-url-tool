@@ -29,3 +29,8 @@ Convert the nodekeys into a folder of nodeurls.txt.
 ```shell
 $ ./create_enodes.sh
 ```
+
+Convert the nodekeys into a static-nodes.json that can be moved to ~/.quai
+```shell
+$ ./create_static_nodes.sh
+```
