@@ -1,4 +1,4 @@
-# Quai Bootnode Util
+# Bootnode Url Utilility
 
 ### Build the binary
 ```shell
@@ -8,6 +8,5 @@ $ go build .
 #### Creating bootnode keys
 
 ```shell
-$ ./quai-bootnode-util --genkey=boot.key
-$ ./quai-bootnode-util --nodekey=boot.key
+$ ./quai-bootnode-util ~/Projects/dev-ops/ansible/bootkeys/**/* > nodeurls.txt 
 ```
