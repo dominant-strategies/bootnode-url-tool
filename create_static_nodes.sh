@@ -43,10 +43,10 @@ done
 
 # Write unique enodes to the respective files
 for category in "${categories[@]}"; do
-    mkdir -p "$dest_dir/$category"
+    mkdir -p "$dest_dir/$category/quai"
     
     # Filter unique enodes and write them to the category's static-nodes.json file
-    sort -u "$temp_dir/$category" | jq -R . | jq -s . > "$dest_dir/$category/static-nodes.json"
+    sort -u "$temp_dir/$category" | jq -R . | jq -s . > "$dest_dir/$category/quai/static-nodes.json"
 done
 
 # Clean up the temporary directory
