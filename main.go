@@ -61,6 +61,7 @@ func main() {
 	}
 
 	// Iterate through the provided file paths
+	urls := map[string][]string{}
 	for _, path := range os.Args[1:] {
 		// Get the absolute path
 		absPath, err := filepath.Abs(path)
@@ -84,20 +85,38 @@ func main() {
 		primeLoc := common.Location{} // Prime
 		nodekey := deriveNodeKey(absPath, primeLoc)
 		nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
-		fmt.Printf("prime:\t\tenode://%s@%s\n", nodeid, ipAddress)
+		primeUrls, ok := urls["prime"]
+		if !ok {
+			primeUrls = []string{}
+		}
+		primeUrls = append(primeUrls, fmt.Sprintf("\"enode://%s@%s\",\n", nodeid, ipAddress))
+		urls["prime"] = primeUrls
 		for regionNum := 0; regionNum < common.NumRegionsInPrime; regionNum++ {
 			regLoc := common.Location{byte(regionNum)}
 			nodekey := deriveNodeKey(absPath, regLoc)
 			nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
-			fmt.Printf("region-%d:\tenode://%s@%s\n", regionNum, nodeid, ipAddress)
+			region := fmt.Sprintf("region-%d\n", regionNum)
+			regionUrls, ok := urls[region]
+			if !ok {
+				regionUrls = []string{}
+			}
+			regionUrls = append(regionUrls, fmt.Sprintf("\"enode://%s@%s\",\n", nodeid, ipAddress))
+			urls[region] = regionUrls
 		}
 		for regionNum := 0; regionNum < common.NumRegionsInPrime; regionNum++ {
 			for zoneNum := 0; zoneNum < common.NumZonesInRegion; zoneNum++ {
 				zoneLoc := common.Location{byte(regionNum), byte(zoneNum)}
 				nodekey := deriveNodeKey(absPath, zoneLoc)
 				nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
-				fmt.Printf("zone-%d-%d:\tenode://%s@%s\n", regionNum, zoneNum, nodeid, ipAddress)
+				zone := fmt.Sprintf("zone-%d-%d\n", regionNum, zoneNum)
+				zoneUrls, ok := urls[zone]
+				if !ok {
+					zoneUrls = []string{}
+				}
+				zoneUrls = append(zoneUrls, fmt.Sprintf("\"enode://%s@%s\",\n", nodeid, ipAddress))
+				urls[zone] = zoneUrls
 			}
 		}
 	}
+	fmt.Println("urls = ", urls)
 }
