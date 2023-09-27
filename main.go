@@ -19,132 +19,85 @@ package main
 
 import (
 	"crypto/ecdsa"
-	"flag"
+	"crypto/elliptic"
 	"fmt"
-	"net"
+	"math/big"
 	"os"
+	"path/filepath"
 
 	"github.com/dominant-strategies/go-quai/cmd/utils"
+	"github.com/dominant-strategies/go-quai/common"
 	"github.com/dominant-strategies/go-quai/crypto"
-	"github.com/dominant-strategies/go-quai/log"
-	"github.com/dominant-strategies/go-quai/p2p/discover"
-	"github.com/dominant-strategies/go-quai/p2p/enode"
-	"github.com/dominant-strategies/go-quai/p2p/nat"
-	"github.com/dominant-strategies/go-quai/p2p/netutil"
 )
 
-func main() {
-	var (
-		listenAddr  = flag.String("addr", ":30301", "listen address")
-		genKey      = flag.String("genkey", "", "generate a node key")
-		writeAddr   = flag.Bool("writeaddress", false, "write out the node's public key and quit")
-		nodeKeyFile = flag.String("nodekey", "", "private key filename")
-		nodeKeyHex  = flag.String("nodekeyhex", "", "private key as hex (for testing)")
-		natdesc     = flag.String("nat", "none", "port mapping mechanism (any|none|upnp|pmp|pmp:<IP>|extip:<IP>)")
-		netrestrict = flag.String("netrestrict", "", "restrict network communication to the given IP networks (CIDR masks)")
-		runv5       = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
-		verbosity   = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
-		vmodule     = flag.String("vmodule", "", "log verbosity pattern")
-
-		nodeKey *ecdsa.PrivateKey
-		err     error
-	)
-	flag.Parse()
-
-	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	glogger.Verbosity(log.Lvl(*verbosity))
-	glogger.Vmodule(*vmodule)
-	log.Root().SetHandler(glogger)
-
-	natm, err := nat.Parse(*natdesc)
+func deriveNodeKey(keyfile string, location common.Location) *ecdsa.PrivateKey {
+	curve := elliptic.P256()
+	order := curve.Params().P
+	// Load the node private key from the file
+	seed, err := crypto.LoadECDSA(keyfile)
 	if err != nil {
-		utils.Fatalf("-nat: %v", err)
+		utils.Fatalf("Failed to open keyfile", keyfile)
 	}
-	switch {
-	case *genKey != "":
-		nodeKey, err = crypto.GenerateKey()
-		if err != nil {
-			utils.Fatalf("could not generate key: %v", err)
-		}
-		if err = crypto.SaveECDSA(*genKey, nodeKey); err != nil {
-			utils.Fatalf("%v", err)
-		}
-		if !*writeAddr {
-			return
-		}
-	case *nodeKeyFile == "" && *nodeKeyHex == "":
-		utils.Fatalf("Use -nodekey or -nodekeyhex to specify a private key")
-	case *nodeKeyFile != "" && *nodeKeyHex != "":
-		utils.Fatalf("Options -nodekey and -nodekeyhex are mutually exclusive")
-	case *nodeKeyFile != "":
-		if nodeKey, err = crypto.LoadECDSA(*nodeKeyFile); err != nil {
-			utils.Fatalf("-nodekey: %v", err)
-		}
-	case *nodeKeyHex != "":
-		if nodeKey, err = crypto.HexToECDSA(*nodeKeyHex); err != nil {
-			utils.Fatalf("-nodekeyhex: %v", err)
-		}
-	}
-
-	if *writeAddr {
-		fmt.Printf("%x\n", crypto.FromECDSAPub(&nodeKey.PublicKey)[1:])
-		os.Exit(0)
-	}
-
-	var restrictList *netutil.Netlist
-	if *netrestrict != "" {
-		restrictList, err = netutil.ParseNetlist(*netrestrict)
-		if err != nil {
-			utils.Fatalf("-netrestrict: %v", err)
-		}
-	}
-
-	addr, err := net.ResolveUDPAddr("udp", *listenAddr)
+	pkey := big.NewInt(0).Mod(seed.D, order)
+	//// Tweak the private key to be unique for each location
+	locationTweak := big.NewInt(0).SetBytes(crypto.Keccak256([]byte(location.Name())))
+	locationTweak.Mod(locationTweak, order)
+	tweakedKey := pkey.Mul(pkey, locationTweak)
+	tweakedKey.Mod(tweakedKey, order)
+	bytes := make([]byte, 32)
+	copy(bytes, tweakedKey.Bytes())
+	key, err := crypto.ToECDSA(bytes)
 	if err != nil {
-		utils.Fatalf("-ResolveUDPAddr: %v", err)
+		utils.Fatalf("Failed to load private key", keyfile, err)
 	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		utils.Fatalf("-ListenUDP: %v", err)
-	}
-
-	realaddr := conn.LocalAddr().(*net.UDPAddr)
-	if natm != nil {
-		if !realaddr.IP.IsLoopback() {
-			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
-		}
-		if ext, err := natm.ExternalIP(); err == nil {
-			realaddr = &net.UDPAddr{IP: ext, Port: realaddr.Port}
-		}
-	}
-
-	printNotice(&nodeKey.PublicKey, *realaddr)
-
-	db, _ := enode.OpenDB("")
-	ln := enode.NewLocalNode(db, nodeKey)
-	cfg := discover.Config{
-		PrivateKey:  nodeKey,
-		NetRestrict: restrictList,
-	}
-	if *runv5 {
-		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
-			utils.Fatalf("%v", err)
-		}
-	} else {
-		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
-			utils.Fatalf("%v", err)
-		}
-	}
-
-	select {}
+	return key
 }
 
-func printNotice(nodeKey *ecdsa.PublicKey, addr net.UDPAddr) {
-	if addr.IP.IsUnspecified() {
-		addr.IP = net.IP{127, 0, 0, 1}
+func main() {
+	// Check if command-line arguments are provided
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: go run nodekey-tool.go file1 file2 ...")
+		return
 	}
-	n := enode.NewV4(nodeKey, addr.IP, 0, addr.Port)
-	fmt.Println(n.URLv4())
-	fmt.Println("Note: you're using cmd/bootnode, a developer tool.")
-	fmt.Println("We recommend using a regular node as bootstrap node for production deployments.")
+
+	// Iterate through the provided file paths
+	for _, path := range os.Args[1:] {
+		// Get the absolute path
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			fmt.Printf("Error: %s\n", err)
+			continue // Skip to the next path on error
+		}
+		// Check if the path is a file (not a directory)
+		fileInfo, err := os.Stat(absPath)
+		if err != nil {
+			fmt.Printf("Error: %s\n", err)
+			continue // Skip to the next path on error
+		}
+		if !fileInfo.Mode().IsRegular() {
+			continue // Skip if it's not a regular file (e.g., a directory)
+		}
+		// Parse the IP address from the directory name
+		dirName, _ := filepath.Split(absPath)
+		ipAddress := filepath.Base(dirName)
+		// Derive the enodes for the given keyfile
+		primeLoc := common.Location{} // Prime
+		nodekey := deriveNodeKey(absPath, primeLoc)
+		nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
+		fmt.Printf("prime:\t\tenode://%s@%s\n", nodeid, ipAddress)
+		for regionNum := 0; regionNum < common.NumRegionsInPrime; regionNum++ {
+			regLoc := common.Location{byte(regionNum)}
+			nodekey := deriveNodeKey(absPath, regLoc)
+			nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
+			fmt.Printf("region-%d:\tenode://%s@%s\n", regionNum, nodeid, ipAddress)
+		}
+		for regionNum := 0; regionNum < common.NumRegionsInPrime; regionNum++ {
+			for zoneNum := 0; zoneNum < common.NumZonesInRegion; zoneNum++ {
+				zoneLoc := common.Location{byte(regionNum), byte(zoneNum)}
+				nodekey := deriveNodeKey(absPath, zoneLoc)
+				nodeid := fmt.Sprintf("%x", crypto.FromECDSAPub(&nodekey.PublicKey)[1:])
+				fmt.Printf("zone-%d-%d:\tenode://%s@%s\n", regionNum, zoneNum, nodeid, ipAddress)
+			}
+		}
+	}
 }
