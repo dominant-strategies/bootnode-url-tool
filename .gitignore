@@ -1,3 +1,9 @@
 quai-bootnode-util
 bootnode.key
 boot.key
+keys/
+nodeurls.txt
+keys.yml
+enodes/
+static-nodes/
+nodeurls.json
